@@ -1,15 +1,6 @@
 # FSC — Fast Sec Commerce
 > Plataforma de Auditoria Antifraude e Liquidação Financeira para E-commerce · v1.0.0
 
----
-
-## Sumário
-
-- [ Documentação Não Técnica — Visão de Negócio](#-documentação-não-técnica--visão-de-negócio)
-- [ Documentação Técnica — Referência de Engenharia](#-documentação-técnica--referência-de-engenharia)
-
----
-
 #  Documentação Não Técnica — Visão de Negócio
 
 ## O que é o FSC?
