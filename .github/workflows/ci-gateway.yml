@@ -1,0 +1,76 @@
+name: CI - FSC Gateway
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'fsc-gateway/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'fsc-gateway/**'
+
+env:
+  JAVA_VERSION: '22'
+
+jobs:
+  build-and-test:
+    name: Build, Test & Analyze
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: fsc_user
+          POSTGRES_PASSWORD: fsc_password
+          POSTGRES_DB: fsc_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Build with Maven (skip tests for initial compilation check)
+        run: mvn -B compile --file pom.xml
+
+      - name: Run Unit & Integration Tests
+        run: mvn -B test --file pom.xml
+        env:
+          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/fsc_db
+          SPRING_DATASOURCE_USERNAME: fsc_user
+          SPRING_DATASOURCE_PASSWORD: fsc_password
+          SPRING_DATA_REDIS_HOST: localhost
+
+      - name: Package WAR
+        run: mvn -B package -DskipTests --file fsc-gateway/pom.xml
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fsc-gateway-war
+          path: fsc-gateway/target/fsc-gateway.war
+          retention-days: 7

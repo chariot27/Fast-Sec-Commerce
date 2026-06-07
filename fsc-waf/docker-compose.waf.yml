@@ -1,0 +1,70 @@
+## docker-compose.waf.yml
+## Orquestra as 3 camadas do FSC WAF:
+##   C++ (Envoy)  → porta 8090 (entrada WAF)
+##   Rust Engine  → porta 9100 (inspeção)
+##   Go Control   → porta 9200 (dashboard)
+##
+## Uso: docker compose -f docker-compose.yml -f fsc-waf/docker-compose.waf.yml up -d
+
+version: "3.8"
+
+services:
+
+  ## ── Rust WAF Engine ── Deep Packet Inspection ─────────────
+  fsc-waf-engine:
+    build:
+      context: ./fsc-waf/engine
+      dockerfile: Dockerfile
+    container_name: fsc-waf-engine
+    ports:
+      - "9100:9100"
+    environment:
+      - CONTROL_PLANE_URL=http://fsc-waf-control:9200/events
+      - RUST_LOG=info
+    networks:
+      - fsc-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9100/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  ## ── Go Control Plane ── Telemetria & Dashboard ─────────────
+  fsc-waf-control:
+    build:
+      context: ./fsc-waf/control
+      dockerfile: Dockerfile
+    container_name: fsc-waf-control
+    ports:
+      - "9200:9200"
+    networks:
+      - fsc-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  ## ── Envoy Proxy ── C++ Layer (Traffic Interceptor) ─────────
+  fsc-waf-proxy:
+    image: envoyproxy/envoy:v1.29-latest
+    container_name: fsc-waf-proxy
+    ports:
+      - "8090:8090"    # Entrada WAF (substituir acesso direto ao Gateway)
+      - "9901:9901"    # Admin Envoy
+    volumes:
+      - ./fsc-waf/proxy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+    command: envoy -c /etc/envoy/envoy.yaml
+    depends_on:
+      fsc-waf-engine:
+        condition: service_healthy
+    networks:
+      - fsc-network
+    restart: unless-stopped
+
+networks:
+  fsc-network:
+    external: true
+    name: erp_fsc-network

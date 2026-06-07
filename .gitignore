@@ -1,0 +1,128 @@
+# ============================================================
+# FSC — .gitignore Completo
+# Gerado após análise completa do projeto em 2026-06-07
+# ============================================================
+
+# ── Segurança — NUNCA commitar ───────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.jks
+certs/
+secrets/
+
+# ── Java / Maven ─────────────────────────────────────────────
+target/
+*.class
+*.war
+*.jar
+!**/test/**/*.jar
+.mvn/wrapper/maven-wrapper.jar
+mvnw
+mvnw.cmd
+hs_err_pid*.log
+replay_pid*.log
+
+# ── Node.js (Mainframe Simulator + fsc-web) ──────────────────
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn-integrity
+package-lock.json
+
+# ── Frontend Vue / Vite ──────────────────────────────────────
+fsc-web/dist/
+fsc-web/.vite/
+fsc-web/coverage/
+*.local
+
+# ── Rust (WAF Engine) ────────────────────────────────────────
+fsc-waf/engine/target/
+fsc-waf/engine/**/*.rs.bk
+Cargo.lock
+
+# ── Go (WAF Control Plane) ───────────────────────────────────
+fsc-waf/control/fsc-waf-control
+fsc-waf/control/go.sum
+
+# ── Binários compilados (WAF) ────────────────────────────────
+fsc-waf/engine/target/
+fsc-waf/control/fsc-waf-control
+
+# ── Docker ───────────────────────────────────────────────────
+.docker/
+docker-compose.override.yml
+
+# ── IDEs e Editores ──────────────────────────────────────────
+.idea/
+*.iml
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+.classpath
+.project
+.settings/
+.factorypath
+*.swp
+*.swo
+*~
+
+# ── Sistema Operacional ──────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ── Logs ─────────────────────────────────────────────────────
+*.log
+logs/
+/log/
+
+# ── Arquivos temporários e de teste ──────────────────────────
+*.tmp
+*.temp
+*.bak
+*.orig
+*.patch
+tmp/
+temp/
+coverage/
+.nyc_output/
+test-results/
+surefire-reports/
+
+# ── Kubernetes / Infraestrutura ──────────────────────────────
+kubeconfig
+*.kubeconfig
+k8s/secrets/
+
+# ── Prometheus / Grafana dados locais ────────────────────────
+prometheus_data/
+grafana_data/
+
+# ── PostgreSQL / Redis dumps locais ──────────────────────────
+*.sql.gz
+*.dump
+postgres_data/
+redis_data/
+
+# ── LocalStack dados locais ──────────────────────────────────
+localstack_data/
+.localstack/
+
+# ── Scripts gerados / relatórios ─────────────────────────────
+PENTEST_REPORT.md
+DOCS_NAO_TECNICA.md
+SCALABILITY_ANALYSIS.md

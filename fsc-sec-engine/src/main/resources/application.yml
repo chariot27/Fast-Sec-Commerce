@@ -1,0 +1,102 @@
+server:
+  port: 8081
+  tomcat:
+    threads:
+      max: 400
+      min-spare: 20
+
+spring:
+  application:
+    name: fsc-sec-engine
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/fsc_db
+    username: fsc_user
+    password: fsc_password
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      # Para 20-25k usuários: cada instância do sec-engine precisa de um pool robusto
+      # Com 10 instâncias k8s, pool de 200 = 2000 conexões totais no Postgres
+      maximum-pool-size: 200
+      minimum-idle: 20
+      idle-timeout: 30000
+      connection-timeout: 5000
+      max-lifetime: 1800000
+      pool-name: FSC-HikariPool
+      # Validação de conexão para evitar conexões mortas
+      connection-test-query: SELECT 1
+      validation-timeout: 3000
+      leak-detection-threshold: 60000
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: false             # Desabilitar em produção
+        jdbc.batch_size: 50           # Batch writes para INSERT em massa
+        order_inserts: true
+        order_updates: true
+        generate_statistics: false    # Desabilitar stats em produção
+    open-in-view: false               # Evita queries durante render
+
+  kafka:
+    bootstrap-servers: localhost:9094
+    consumer:
+      group-id: sec-engine-group
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # Consumo em batch para maior throughput
+      max-poll-records: 500
+      fetch-min-size: 1048576         # 1MB mínimo por fetch
+      fetch-max-wait: 500ms
+      enable-auto-commit: false       # Commit manual para controle de offset
+    listener:
+      concurrency: 12                 # 12 threads de consumer por instância
+      type: batch                     # Processa em batch
+      ack-mode: manual_immediate
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: 1
+      compression-type: lz4
+
+  cloud:
+    aws:
+      region:
+        static: us-east-1
+      credentials:
+        access-key: test
+        secret-key: test
+      s3:
+        endpoint: http://localhost:4566
+      sqs:
+        endpoint: http://localhost:4566
+
+grpc:
+  server:
+    port: 9092
+    # Para alto throughput: muitas threads para processar chamadas gRPC paralelas
+    security:
+      enabled: true
+      certificate-chain: file:../certs/sec-engine.crt
+      private-key: file:../certs/sec-engine.key
+      trust-cert-collection: file:../certs/ca.crt
+      client-auth: REQUIRE
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus,info,metrics
+  tracing:
+    sampling:
+      probability: 0.05             # 5% em produção (era 100%)
+  otlp:
+    tracing:
+      endpoint: http://localhost:4318/v1/traces
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true

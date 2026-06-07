@@ -1,0 +1,33 @@
+[package]
+name = "fsc-waf-engine"
+version = "1.0.0"
+edition = "2021"
+description = "FSC WAF — Rust Inspection Engine (OWASP Layer 7 Deep Packet Inspection)"
+
+[dependencies]
+# HTTP Server async
+tokio       = { version = "1", features = ["full"] }
+axum        = "0.7"
+# Serialização
+serde       = { version = "1", features = ["derive"] }
+serde_json  = "1"
+# Regex engine (análise de padrões OWASP)
+regex       = "1"
+once_cell   = "1"
+# Rate limiting (concurrent HashMap)
+dashmap     = "5"
+# Logging
+tracing             = "0.1"
+tracing-subscriber  = { version = "0.3", features = ["env-filter"] }
+# Timestamps
+chrono = { version = "0.4", features = ["serde"] }
+# HTTP client (notificar o Go control plane)
+reqwest = { version = "0.12", features = ["json"] }
+# Uuid para trace IDs
+uuid = { version = "1", features = ["v4"] }
+
+[profile.release]
+opt-level     = 3
+lto           = true
+codegen-units = 1
+panic         = "abort"

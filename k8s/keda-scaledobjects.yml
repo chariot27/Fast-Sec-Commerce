@@ -1,0 +1,92 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: fsc-sec-engine-scaler
+  namespace: fsc
+spec:
+  scaleTargetRef:
+    name: fsc-sec-engine
+  minReplicaCount: 5            # Mínimo de 5 pods sempre quentes
+  maxReplicaCount: 30           # Escala até 30 pods no pico máximo (25k usuários)
+  cooldownPeriod: 30            # Desce escala mais rápido (era 60s)
+  pollingInterval: 10           # Verifica lag a cada 10s (era 15s)
+  triggers:
+    # Escala baseado no consumer lag do Kafka
+    - type: kafka
+      metadata:
+        bootstrapServers: fsc-kafka-service:9092
+        consumerGroup: sec-engine-group
+        topic: fsc.transactions.pending
+        lagThreshold: "50"      # 1 pod extra a cada 50 mensagens pendentes (era 100)
+        offsetResetPolicy: latest
+    # Também escala por CPU
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: "65"             # Escala quando CPU > 65%
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: fsc-gateway-scaler
+  namespace: fsc
+spec:
+  scaleTargetRef:
+    name: fsc-gateway
+  minReplicaCount: 5            # 5 gateways sempre ativos
+  maxReplicaCount: 20           # Até 20 instâncias do gateway
+  cooldownPeriod: 60
+  pollingInterval: 15
+  triggers:
+    # Escala por RPS no gateway (via Prometheus)
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus-service:9090
+        metricName: http_server_requests_seconds_count
+        threshold: "500"        # 1 réplica extra a cada 500 req/s (era 1000)
+        query: sum(rate(http_server_requests_seconds_count{app="fsc-gateway"}[1m]))
+    # Também escala por CPU
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: "60"
+---
+# HPA padrão como fallback (sem KEDA)
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: fsc-gateway-hpa
+  namespace: fsc
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: fsc-gateway
+  minReplicas: 5
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 75
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 15     # Sobe escala rapidamente
+      policies:
+        - type: Pods
+          value: 4
+          periodSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 120    # Desce escala com cautela
+      policies:
+        - type: Percent
+          value: 25
+          periodSeconds: 60

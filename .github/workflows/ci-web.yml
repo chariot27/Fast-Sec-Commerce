@@ -1,0 +1,46 @@
+name: CI - FSC Web (Vue)
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'fsc-web/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'fsc-web/**'
+
+jobs:
+  build:
+    name: Build & Type Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: fsc-web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: fsc-web
+        run: npm ci
+
+      - name: TypeScript Type Check
+        working-directory: fsc-web
+        run: npx vue-tsc --noEmit
+
+      - name: Build production bundle
+        working-directory: fsc-web
+        run: npm run build
+
+      - name: Upload dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: fsc-web-dist
+          path: fsc-web/dist/
+          retention-days: 7

@@ -1,0 +1,53 @@
+{
+  "realm": "fsc",
+  "enabled": true,
+  "clients": [
+    {
+      "clientId": "fsc-vue",
+      "enabled": true,
+      "publicClient": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "http://localhost:5173/*"
+      ],
+      "webOrigins": [
+        "*"
+      ]
+    },
+    {
+      "clientId": "fsc-gateway",
+      "enabled": true,
+      "bearerOnly": true
+    }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "fsc_user",
+        "description": "Comprador Padrão"
+      },
+      {
+        "name": "fsc_admin",
+        "description": "Administrador de Risco"
+      }
+    ]
+  },
+  "users": [
+    {
+      "username": "admin",
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "fsc_admin"
+      ]
+    }
+  ]
+}

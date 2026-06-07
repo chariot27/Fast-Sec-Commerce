@@ -1,0 +1,110 @@
+server:
+  port: 8082
+  tomcat:
+    # Para 20-25k usuários simultâneos com múltiplas instâncias
+    # Cada instância do gateway usa até 800 threads de worker
+    threads:
+      max: 800
+      min-spare: 50
+    accept-count: 2000          # Fila de conexões TCP pendentes
+    max-connections: 20000      # Conexões simultâneas por instância
+    connection-timeout: 5000
+
+spring:
+  application:
+    name: fsc-gateway
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: http://localhost:8080/realms/fsc
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      # FIX T1046: senha obrigatória via variável de ambiente
+      password: ${REDIS_PASSWORD}
+      lettuce:
+        pool:
+          max-active: 100       # Pool de conexões Redis (rate-limit distribuído)
+          max-idle: 20
+          min-idle: 5
+          max-wait: 1000ms
+
+  kafka:
+    bootstrap-servers: localhost:9094
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      batch-size: 65536         # 64KB por batch (throughput maior)
+      linger-ms: 5              # Aguarda 5ms para agrupar mensagens em batch
+      compression-type: lz4    # Compressão lz4 reduz tráfego de rede
+      acks: 1                   # ACK do líder (equilíbrio entre velocidade e durabilidade)
+      buffer-memory: 67108864   # 64MB de buffer local do producer
+      properties:
+        spring.json.add.type.headers: false
+        max.in.flight.requests.per.connection: 5
+
+grpc:
+  client:
+    sec-engine:
+      address: 'static://localhost:9092'
+      negotiation-type: TLS
+      security:
+        trust-cert-collection: file:../certs/ca.crt
+        client-cert-chain: file:../certs/gateway.crt
+        client-private-key: file:../certs/gateway.key
+      # Pool de conexões gRPC para alto throughput
+      keepAliveTime: 30s
+      keepAliveTimeout: 10s
+      keepAliveWithoutCalls: true
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      secEngineCircuitBreaker:
+        registerHealthIndicator: true
+        slidingWindowSize: 50         # Janela maior (era 10) para picos altos
+        slidingWindowType: COUNT_BASED
+        failureRateThreshold: 60      # Tolera mais antes de abrir (era 50)
+        slowCallRateThreshold: 80     # Também protege contra lentidão
+        slowCallDurationThreshold: 3s
+        waitDurationInOpenState: 5000ms   # Recupera mais rápido (era 10s)
+        permittedNumberOfCallsInHalfOpenState: 10
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+  timelimiter:
+    instances:
+      secEngineTimeLimiter:
+        timeoutDuration: 8s           # Mais tempo para gRPC sob carga (era 2s)
+        cancelRunningFuture: true
+  bulkhead:
+    instances:
+      secEngineCircuitBreaker:
+        maxConcurrentCalls: 500       # Máximo de chamadas paralelas ao sec-engine
+        maxWaitDuration: 1s
+  ratelimiter:
+    instances:
+      secEngineCircuitBreaker:
+        limitForPeriod: 5000          # 5000 req por ciclo
+        limitRefreshPeriod: 1s
+        timeoutDuration: 500ms
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus,info,metrics
+  tracing:
+    sampling:
+      probability: 0.1              # 10% de sampling em produção (era 100%)
+  otlp:
+    tracing:
+      endpoint: http://localhost:4318/v1/traces
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+      sla:
+        http.server.requests: 50ms,100ms,200ms,500ms,1s

@@ -1,0 +1,117 @@
+## Envoy Proxy — FSC WAF (Camada C++)
+## Intercepta todo tráfego e chama o Rust WAF Engine via ext_authz HTTP
+## Porta de entrada: 8090 (WAF) → roteia para fsc-gateway:8082 e mainframe:9191
+
+static_resources:
+
+  listeners:
+    ## ── Listener principal do WAF (substitui acesso direto ao Gateway) ──
+    - name: fsc_waf_listener
+      address:
+        socket_address:
+          address: 0.0.0.0
+          port_value: 8090
+      filter_chains:
+        - filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: fsc_waf
+                access_log:
+                  - name: envoy.access_loggers.stdout
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.access_loggers.stream.v3.StdoutAccessLog
+                      log_format:
+                        text_format: "[WAF-ENVOY] %START_TIME% %REQ(:METHOD)% %REQ(X-ENVOY-ORIGINAL-PATH?:PATH)% %RESPONSE_CODE% %RESPONSE_FLAGS% %DURATION%ms IP=%REQ(X-FORWARDED-FOR)%\n"
+                ## ── Filtro HTTP que chama o WAF Engine (ext_authz) ──
+                http_filters:
+                  - name: envoy.filters.http.ext_authz
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.ext_authz.v3.ExtAuthz
+                      http_service:
+                        server_uri:
+                          uri: http://fsc-waf-engine:9100
+                          cluster: waf_engine_cluster
+                          timeout: 0.1s         # 100ms max — nunca trava o usuário
+                        path_prefix: /check
+                        authorization_request:
+                          headers_to_add:
+                            - header:
+                                key: x-waf-source
+                                value: envoy
+                      failure_mode_allow: true  # Fail-open: se o engine cair, permite tráfego
+                      with_request_body:
+                        max_request_bytes: 8192  # Envia até 8KB do body para inspeção
+                        allow_partial_message: true
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+
+                ## ── Roteamento baseado em prefixo de path ──
+                route_config:
+                  name: fsc_routes
+                  virtual_hosts:
+                    - name: fsc_services
+                      domains: ["*"]
+                      routes:
+                        ## Mainframe API
+                        - match:
+                            prefix: "/zosconnect"
+                          route:
+                            cluster: mainframe_cluster
+                            timeout: 10s
+                        ## Gateway API (padrão)
+                        - match:
+                            prefix: "/"
+                          route:
+                            cluster: gateway_cluster
+                            timeout: 30s
+
+  clusters:
+    ## ── WAF Engine Rust (ext_authz) ──
+    - name: waf_engine_cluster
+      connect_timeout: 0.1s
+      type: STRICT_DNS
+      load_assignment:
+        cluster_name: waf_engine_cluster
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: fsc-waf-engine
+                      port_value: 9100
+
+    ## ── FSC Gateway (Spring Boot) ──
+    - name: gateway_cluster
+      connect_timeout: 5s
+      type: STRICT_DNS
+      load_assignment:
+        cluster_name: gateway_cluster
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: host.docker.internal
+                      port_value: 8082
+
+    ## ── FSC Mainframe Simulator (Node.js) ──
+    - name: mainframe_cluster
+      connect_timeout: 5s
+      type: STRICT_DNS
+      load_assignment:
+        cluster_name: mainframe_cluster
+        endpoints:
+          - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: host.docker.internal
+                      port_value: 9191
+
+admin:
+  address:
+    socket_address:
+      address: 0.0.0.0
+      port_value: 9901      # Admin Envoy: http://localhost:9901

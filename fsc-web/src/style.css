@@ -1,0 +1,14 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #0a0a0a;
+  --color-neonBlue: #00f0ff;
+  --color-darkSurface: #121212;
+  --shadow-neon: 0 0 10px #00f0ff, 0 0 20px #00f0ff;
+}
+
+@layer base {
+  body {
+    @apply bg-background text-white antialiased;
+  }
+}
