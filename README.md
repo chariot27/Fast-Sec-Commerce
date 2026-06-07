@@ -5,20 +5,20 @@
 
 ## Sumário
 
-- [📋 Documentação Não Técnica — Visão de Negócio](#-documentação-não-técnica--visão-de-negócio)
-- [🔧 Documentação Técnica — Referência de Engenharia](#-documentação-técnica--referência-de-engenharia)
+- [ Documentação Não Técnica — Visão de Negócio](#-documentação-não-técnica--visão-de-negócio)
+- [ Documentação Técnica — Referência de Engenharia](#-documentação-técnica--referência-de-engenharia)
 
 ---
 
-# 📋 Documentação Não Técnica — Visão de Negócio
+#  Documentação Não Técnica — Visão de Negócio
 
 ## O que é o FSC?
 
 O **FSC (Fast Sec Commerce)** é uma **plataforma de segurança financeira para e-commerce**. Funciona como um guardião inteligente entre o cliente que compra e o lojista que vende:
 
-- ✅ **Verifica se a compra é fraude** antes de aprovar (em menos de 100ms)
-- 💸 **Movimenta o dinheiro** com a confiabilidade de um sistema bancário (mainframe IBM)
-- 📋 **Registra tudo** para auditoria e conformidade legal (LGPD)
+- **Verifica se a compra é fraude** antes de aprovar (em menos de 100ms)
+- **Movimenta o dinheiro** com a confiabilidade de um sistema bancário (mainframe IBM)
+- **Registra tudo** para auditoria e conformidade legal (LGPD)
 
 ## Qual problema ele resolve?
 
@@ -139,8 +139,8 @@ O sistema suporta **20.000 a 25.000 usuários simultâneos**:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  CAMADA 1 – APRESENTAÇÃO                                     │
-│  Vue.js 3 (fsc-web · porta 5174) ←→ Keycloak OAuth2        │
+│  CAMADA 1 – APRESENTAÇÃO                                    │
+│  Vue.js 3 (fsc-web · porta 5174) ←→ Keycloak OAuth2         │
 │  Painel: Auditoria + Core Ledger z/OS + Manual              │
 └───────────────────┬─────────────────────────────────────────┘
                     │ HTTPS + JWT (Bearer RS256)
@@ -159,14 +159,14 @@ O sistema suporta **20.000 a 25.000 usuários simultâneos**:
 │  gRPC Server (porta 9092)       │
 └─────────────────────────────────┘
 ┌─────────────────────────────────────────────────────────────┐
-│  CAMADA 4 – CORE LEDGER  (fsc-mainframe · Node.js · 9191)  │
-│  COBOL: FSCCHK · FSCSET · FSCBCH                           │
+│  CAMADA 4 – CORE LEDGER  (fsc-mainframe · Node.js · 9191)   │
+│  COBOL: FSCCHK · FSCSET · FSCBCH                            │
 │  DB2 in-memory · IBM MQ Queue simulada · SSE Feed           │
 └─────────────────────────────────────────────────────────────┘
 ┌─────────────────────────────────────────────────────────────┐
-│  OBSERVABILIDADE                                             │
+│  OBSERVABILIDADE                                            │
 │  Jaeger (16686) · Prometheus (9090) · Grafana (3000)        │
-│  OpenTelemetry OTLP → sampling 10% (gateway) / 5% (engine) │
+│  OpenTelemetry OTLP → sampling 10% (gateway) / 5% (engine)  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
