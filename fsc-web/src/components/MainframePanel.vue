@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 
-const MAINFRAME_URL = 'http://localhost:9191/zosconnect'
+const props = withDefaults(defineProps<{
+  mainframeUrl?: string
+}>(), {
+  mainframeUrl: 'http://localhost:9191/zosconnect'
+})
 
-// ─── Estado ────────────────────────────────────────────────────────
+const MAINFRAME_URL = props.mainframeUrl.replace(/\/zosconnect$/, '') + '/zosconnect'
+
+// Estado
 const status = ref<'online' | 'offline' | 'connecting'>('connecting')
 const accounts = ref<any[]>([])
 const report = ref<any>(null)
@@ -17,24 +23,33 @@ const checkResult = ref<any>(null)
 const mqDepth = ref(0)
 const activeSection = ref<'ledger' | 'check' | 'settle' | 'report' | 'sysprint'>('ledger')
 const sysprintText = ref('')
+const authError = ref(false)
 
 let eventSource: EventSource | null = null
 
-// ─── Helpers ────────────────────────────────────────────────────────
+// Helpers
 const fmt = (n: number) => n?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) ?? 'R$ 0,00'
 
-// ─── Funções de API ─────────────────────────────────────────────────
+function getAuthHeaders(): HeadersInit {
+  const token = localStorage.getItem('fsc_token')
+  if (!token) return {}
+  return { 'Authorization': `Bearer ${token}` }
+}
 
+// Funcoes de API
 async function loadAccounts() {
   try {
-    const res = await fetch(`${MAINFRAME_URL}/accounts`)
+    const res = await fetch(`${MAINFRAME_URL}/accounts`, { headers: getAuthHeaders() })
+    if (res.status === 401) { authError.value = true; return }
     accounts.value = await res.json()
+    authError.value = false
   } catch { accounts.value = [] }
 }
 
 async function loadReport() {
   try {
-    const res = await fetch(`${MAINFRAME_URL}/fscbch/daily-report`)
+    const res = await fetch(`${MAINFRAME_URL}/fscbch/daily-report`, { headers: getAuthHeaders() })
+    if (res.status === 401) { authError.value = true; return }
     const data = await res.json()
     report.value = data
     sysprintText.value = data.sysprint ?? ''
@@ -45,7 +60,7 @@ async function checkBalance() {
   if (!checkAcct.value) return
   try {
     const url = `${MAINFRAME_URL}/fscchk/balance/${encodeURIComponent(checkAcct.value)}?amount=${checkAmount.value || 0}`
-    const res = await fetch(url)
+    const res = await fetch(url, { headers: getAuthHeaders() })
     checkResult.value = { ...await res.json(), httpStatus: res.status }
   } catch (e: any) { checkResult.value = { error: e.message } }
 }
@@ -56,7 +71,10 @@ async function doSettle() {
   try {
     const res = await fetch(`${MAINFRAME_URL}/fscset/settle`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
       body: JSON.stringify({
         orderId: settlement.value.orderId || `ORD-${Date.now()}`,
         debitAcct: settlement.value.debitAcct,
@@ -66,7 +84,6 @@ async function doSettle() {
     })
     const data = await res.json()
     settleResult.value = { ...data, httpStatus: res.status }
-    // Recarregar contas e relatório após liquidação
     await Promise.all([loadAccounts(), loadReport()])
   } catch (e: any) {
     settleResult.value = { error: e.message }
@@ -74,6 +91,9 @@ async function doSettle() {
 }
 
 function connectSSE() {
+  const token = localStorage.getItem('fsc_token')
+  // Para SSE autenticado, o token e passado pelo servidor proxy ou via handshake inicial
+  // Em desenvolvimento local o servidor aceita sem auth no SSE; em producao use nginx proxy com header injection
   eventSource = new EventSource(`${MAINFRAME_URL}/ledger-events`)
   eventSource.onopen = () => { status.value = 'online' }
   eventSource.onerror = () => { status.value = 'offline' }
@@ -93,6 +113,14 @@ onMounted(async () => {
 })
 
 onUnmounted(() => eventSource?.close())
+
+const sections = [
+  { key: 'ledger',   label: 'Ledger Live' },
+  { key: 'check',    label: 'FSCCHK — Saldo' },
+  { key: 'settle',   label: 'FSCSET — Liquidar' },
+  { key: 'report',   label: 'FSCBCH — Relatorio' },
+  { key: 'sysprint', label: 'SYSPRINT JCL' },
+]
 </script>
 
 <template>
@@ -102,7 +130,7 @@ onUnmounted(() => eventSource?.close())
     <div class="flex items-center justify-between mb-6">
       <div>
         <h2 class="text-lg font-semibold text-white">FSC Core Ledger</h2>
-        <p class="text-xs text-gray-500 mt-0.5">z/OS CICS/DB2 Simulator · Programas: FSCCHK · FSCSET · FSCBCH</p>
+        <p class="text-xs text-gray-500 mt-0.5">z/OS CICS/DB2 Simulator — Programas: FSCCHK · FSCSET · FSCBCH</p>
       </div>
       <div class="flex items-center gap-2 border border-white/10 rounded-lg px-3 py-1.5">
         <span :class="status === 'online' ? 'bg-green-400 shadow-[0_0_6px_#4ade80]' : status === 'connecting' ? 'bg-yellow-400 animate-pulse' : 'bg-red-500'"
@@ -114,22 +142,22 @@ onUnmounted(() => eventSource?.close())
       </div>
     </div>
 
-    <!-- Sub-navegação -->
+    <!-- Aviso de autenticacao -->
+    <div v-if="authError" class="mb-4 bg-yellow-500/10 border border-yellow-500/30 rounded-lg px-4 py-3 text-xs text-yellow-400">
+      <strong>Autenticacao necessaria:</strong> Configure o token JWT no localStorage com a chave <code class="font-mono">fsc_token</code>
+      para acessar os dados do Core Ledger. Obtenha o token via Keycloak (<code class="font-mono">/realms/fsc/protocol/openid-connect/token</code>).
+    </div>
+
+    <!-- Sub-navegacao -->
     <div class="flex gap-2 mb-6 flex-wrap">
-      <button v-for="s in [
-        { key: 'ledger',   label: '📊 Ledger Live' },
-        { key: 'check',    label: '🔎 FSCCHK – Saldo' },
-        { key: 'settle',   label: '💳 FSCSET – Liquidar' },
-        { key: 'report',   label: '📈 FSCBCH – Relatório' },
-        { key: 'sysprint', label: '🖨️ SYSPRINT JCL' },
-      ]" :key="s.key"
+      <button v-for="s in sections" :key="s.key"
         @click="activeSection = s.key as any"
         :class="activeSection === s.key ? 'border-[#00f0ff]/50 text-[#00f0ff] bg-[#00f0ff]/5' : 'border-white/5 text-gray-400 hover:text-gray-200'"
         class="px-3 py-1.5 rounded-lg border text-xs transition-all"
       >{{ s.label }}</button>
     </div>
 
-    <!-- ── LEDGER LIVE ─────────────────────────────────────────── -->
+    <!-- LEDGER LIVE -->
     <div v-if="activeSection === 'ledger'" class="space-y-5">
 
       <!-- Cards das contas (DB2 Snapshot) -->
@@ -151,6 +179,9 @@ onUnmounted(() => eventSource?.close())
               <span>· {{ acct.type }}</span>
             </div>
           </div>
+          <div v-if="accounts.length === 0" class="text-gray-600 italic text-sm col-span-3 text-center py-8">
+            {{ authError ? 'Autenticacao necessaria para visualizar contas.' : 'Conectando ao Core Ledger...' }}
+          </div>
         </div>
       </div>
 
@@ -158,7 +189,7 @@ onUnmounted(() => eventSource?.close())
       <div class="bg-[#0d0d0d] border border-white/5 rounded-xl p-5">
         <p class="text-[10px] uppercase tracking-widest text-gray-500 mb-3">SSE Stream · LEDGER_AUDIT Events</p>
         <div class="space-y-2 max-h-52 overflow-y-auto font-mono text-xs">
-          <div v-if="ledgerEvents.length === 0" class="text-gray-600 italic">Aguardando próximo tick (5s)...</div>
+          <div v-if="ledgerEvents.length === 0" class="text-gray-600 italic">Aguardando proximo tick (5s)...</div>
           <div v-for="(ev, i) in ledgerEvents" :key="i"
                class="bg-[#0a0a0a] border border-white/5 rounded-lg px-3 py-2 flex justify-between items-center text-gray-400">
             <span>
@@ -173,7 +204,7 @@ onUnmounted(() => eventSource?.close())
       </div>
     </div>
 
-    <!-- ── FSCCHK – Verificação de Saldo ───────────────────────── -->
+    <!-- FSCCHK - Verificacao de Saldo -->
     <div v-if="activeSection === 'check'" class="space-y-4">
       <div class="bg-[#0d0d0d] border border-white/5 rounded-xl p-6">
         <p class="text-[10px] uppercase tracking-widest text-gray-500 mb-4">FSCCHK · CICS REST · EXEC SQL SELECT FROM FSC.ACCOUNTS</p>
@@ -199,7 +230,7 @@ onUnmounted(() => eventSource?.close())
           </div>
           <div class="flex gap-4 flex-wrap mt-2">
             <span>SALDO TOTAL: <span class="text-white">{{ fmt(checkResult.fscResBalance) }}</span></span>
-            <span>DISPONÍVEL: <span class="text-[#00f0ff]">{{ fmt(checkResult.fscResAvailable) }}</span></span>
+            <span>DISPONIVEL: <span class="text-[#00f0ff]">{{ fmt(checkResult.fscResAvailable) }}</span></span>
             <span>STATUS: <span :class="checkResult.fscResStatus === 'ACTIVE' ? 'text-green-400' : 'text-yellow-400'">{{ checkResult.fscResStatus }}</span></span>
           </div>
           <p class="text-gray-500 mt-2 italic">{{ checkResult.fscResMsg }}</p>
@@ -207,20 +238,20 @@ onUnmounted(() => eventSource?.close())
       </div>
     </div>
 
-    <!-- ── FSCSET – Liquidação ─────────────────────────────────── -->
+    <!-- FSCSET - Liquidacao -->
     <div v-if="activeSection === 'settle'" class="space-y-4">
       <div class="bg-[#0d0d0d] border border-white/5 rounded-xl p-6">
         <p class="text-[10px] uppercase tracking-widest text-gray-500 mb-4">FSCSET · MQ Triggered · EXEC CICS SYNCPOINT · DEBIT + CREDIT + AUDIT LOG</p>
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="text-xs text-gray-500 mb-1 block">Conta Débito (Comprador)</label>
+            <label class="text-xs text-gray-500 mb-1 block">Conta Debito (Comprador)</label>
             <select v-model="settlement.debitAcct" class="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-white">
               <option value="">— Selecione —</option>
               <option v-for="a in accounts.filter(a => a.type === 'BUYER')" :key="a.id" :value="a.id">{{ a.id }} · {{ fmt(a.balance) }}</option>
             </select>
           </div>
           <div>
-            <label class="text-xs text-gray-500 mb-1 block">Conta Crédito (Lojista)</label>
+            <label class="text-xs text-gray-500 mb-1 block">Conta Credito (Lojista)</label>
             <select v-model="settlement.creditAcct" class="w-full bg-[#0a0a0a] border border-white/10 rounded-lg px-3 py-2 text-sm text-white">
               <option value="">— Selecione —</option>
               <option v-for="a in accounts.filter(a => a.type === 'MERCHANT')" :key="a.id" :value="a.id">{{ a.id }} · {{ fmt(a.balance) }}</option>
@@ -242,7 +273,7 @@ onUnmounted(() => eventSource?.close())
                   class="px-6 py-2 rounded-lg bg-[#00f0ff]/10 border border-[#00f0ff]/30 text-[#00f0ff] text-sm hover:bg-[#00f0ff]/20 transition-all disabled:opacity-50">
             {{ settleLoading ? 'Executando SYNCPOINT...' : 'Executar FSCSET' }}
           </button>
-          <p class="text-[10px] text-gray-600">Taxa FSC: 1,5% sobre o valor (mín. R$0,50)</p>
+          <p class="text-[10px] text-gray-600">Taxa FSC: 1,5% sobre o valor (min. R$0,50)</p>
         </div>
 
         <div v-if="settleResult" class="mt-5 bg-[#0a0a0a] border rounded-xl p-4 font-mono text-xs space-y-2"
@@ -255,25 +286,25 @@ onUnmounted(() => eventSource?.close())
           <p class="text-gray-400 italic">{{ settleResult.fscResMsg }}</p>
           <div v-if="settleResult.settlement" class="mt-2 space-y-1 text-gray-400">
             <p>Trans-ID: <span class="text-white">{{ settleResult.settlement.transId }}</span></p>
-            <p>Débito: <span class="text-red-400">-{{ fmt(settleResult.settlement.totalDebit) }}</span>
-               · Crédito: <span class="text-green-400">+{{ fmt(settleResult.settlement.amount) }}</span>
+            <p>Debito: <span class="text-red-400">-{{ fmt(settleResult.settlement.totalDebit) }}</span>
+               · Credito: <span class="text-green-400">+{{ fmt(settleResult.settlement.amount) }}</span>
                · Taxa: <span class="text-[#00f0ff]">{{ fmt(settleResult.settlement.fee) }}</span></p>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- ── FSCBCH – Relatório Batch ─────────────────────────────── -->
+    <!-- FSCBCH - Relatorio Batch -->
     <div v-if="activeSection === 'report'" class="space-y-4">
       <div class="flex items-center justify-between">
         <p class="text-[10px] uppercase tracking-widest text-gray-500">FSCBCH · Batch JCL · SELECT COUNT/SUM FROM FSC.LEDGER_AUDIT</p>
         <button @click="loadReport" class="text-xs text-[#00f0ff] border border-[#00f0ff]/30 px-3 py-1.5 rounded-lg hover:bg-[#00f0ff]/10 transition-all">
-          ↻ Atualizar
+          Atualizar
         </button>
       </div>
       <div v-if="report" class="grid grid-cols-2 xl:grid-cols-4 gap-3">
         <div class="bg-[#0d0d0d] border border-white/5 rounded-xl p-5">
-          <p class="text-[10px] text-gray-500 uppercase tracking-widest mb-1">Transações Liquidadas</p>
+          <p class="text-[10px] text-gray-500 uppercase tracking-widest mb-1">Transacoes Liquidadas</p>
           <p class="text-3xl font-light text-white">{{ report.totalTransactions.toLocaleString('pt-BR') }}</p>
         </div>
         <div class="bg-[#0d0d0d] border border-white/5 rounded-xl p-5">
@@ -290,9 +321,9 @@ onUnmounted(() => eventSource?.close())
         </div>
       </div>
 
-      <!-- Últimas entradas da LEDGER_AUDIT -->
+      <!-- Ultimas entradas da LEDGER_AUDIT -->
       <div v-if="report?.entries?.length" class="bg-[#0d0d0d] border border-white/5 rounded-xl p-5">
-        <p class="text-[10px] text-gray-500 uppercase tracking-widest mb-3">Últimas Entradas · FSC.LEDGER_AUDIT</p>
+        <p class="text-[10px] text-gray-500 uppercase tracking-widest mb-3">Ultimas Entradas · FSC.LEDGER_AUDIT</p>
         <div class="overflow-x-auto">
           <table class="w-full text-xs">
             <thead>
@@ -306,7 +337,7 @@ onUnmounted(() => eventSource?.close())
             </thead>
             <tbody class="divide-y divide-white/5">
               <tr v-for="e in report.entries.slice().reverse()" :key="e.transId" class="text-gray-400">
-                <td class="py-2 font-mono text-[10px] text-gray-500">{{ e.transId?.slice(0, 16) }}…</td>
+                <td class="py-2 font-mono text-[10px] text-gray-500">{{ e.transId?.slice(0, 16) }}...</td>
                 <td class="py-2 text-right text-white">{{ fmt(e.amount) }}</td>
                 <td class="py-2 text-right text-[#00f0ff]">{{ fmt(e.fee) }}</td>
                 <td class="py-2"><span class="text-green-400 border border-green-400/20 rounded px-1.5 text-[10px]">{{ e.status }}</span></td>
@@ -318,10 +349,10 @@ onUnmounted(() => eventSource?.close())
       </div>
     </div>
 
-    <!-- ── SYSPRINT (output JCL) ──────────────────────────────── -->
+    <!-- SYSPRINT (output JCL) -->
     <div v-if="activeSection === 'sysprint'">
       <p class="text-[10px] uppercase tracking-widest text-gray-500 mb-3">SYSPRINT · Output simulado do JCL FSCBCH</p>
-      <pre class="bg-[#050505] border border-white/5 rounded-xl p-6 font-mono text-xs text-green-400 overflow-x-auto leading-6 whitespace-pre">{{ sysprintText || 'Nenhum relatório ainda. Execute uma liquidação primeiro.' }}</pre>
+      <pre class="bg-[#050505] border border-white/5 rounded-xl p-6 font-mono text-xs text-green-400 overflow-x-auto leading-6 whitespace-pre">{{ sysprintText || 'Nenhum relatorio ainda. Execute uma liquidacao primeiro.' }}</pre>
     </div>
 
   </div>

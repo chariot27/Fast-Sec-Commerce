@@ -10,15 +10,15 @@ class ArchitectureTest {
 
     @Test
     void verifiesModularStructure() {
-        // Verifica se os módulos não quebram as regras de isolamento (ex: repositórios de outros módulos)
+        // Verifica se os modulos nao violam as regras de isolamento do Spring Modulith
         modules.verify();
     }
 
     @Test
     void createModuleDocumentation() {
-        // Gera a documentação arquitetural (PlantUML, C4 Model) na pasta target/spring-modulith-docs
-        new Documenter(modules)
-            .writeDocumentation()
-            .writeIndividualModulesAsPlantUml();
+        // Gera documentacao arquitetural em target/spring-modulith-docs
+        Documenter documenter = new Documenter(modules);
+        documenter.writeDocumentation();
+        documenter.writeIndividualModulesAsPlantUml();
     }
 }

@@ -38,6 +38,9 @@ public class AuditTransaction {
     }
 
     // Getters
-    public UUID getId() { return id; }
-    public String getStatus() { return status; }
+    public UUID getId()           { return id; }
+    public UUID getCustomerId()   { return customerId; }
+    public BigDecimal getAmount() { return amount; }
+    public LocalDateTime getCreatedAt() { return createdAt; }
+    public String getStatus()     { return status; }
 }

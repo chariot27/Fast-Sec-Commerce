@@ -108,3 +108,16 @@ management:
         http.server.requests: true
       sla:
         http.server.requests: 50ms,100ms,200ms,500ms,1s
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+    enabled: true
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
+    tags-sorter: alpha
+    operations-sorter: alpha
+    display-request-duration: true
+    try-it-out-enabled: true
+  show-actuator: false

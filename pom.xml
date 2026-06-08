@@ -21,10 +21,17 @@
 
     <properties>
         <java.version>22</java.version>
+        <!-- Propriedades do compilador — lidas pela IDE e pelo Maven para nivel de linguagem -->
+        <maven.compiler.release>22</maven.compiler.release>
+        <maven.compiler.source>22</maven.compiler.source>
+        <maven.compiler.target>22</maven.compiler.target>
         <spring-modulith.version>1.2.0</spring-modulith.version>
         <testcontainers.version>1.19.8</testcontainers.version>
         <archunit.version>1.3.0</archunit.version>
         <grpc.version>1.64.0</grpc.version>
+        <!-- Versoes de observabilidade — definidas aqui para child poms referenciarem sem conflito de BOM -->
+        <micrometer-tracing.version>1.3.0</micrometer-tracing.version>
+        <opentelemetry-instrumentation.version>1.38.0</opentelemetry-instrumentation.version>
     </properties>
 
     <modules>
@@ -92,9 +99,7 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <configuration>
-                    <source>${java.version}</source>
-                    <target>${java.version}</target>
-                    <!-- Enable preview features if needed for Java 22, ex: <compilerArgs>-Xenable-preview</compilerArgs> -->
+                    <release>${java.version}</release>
                 </configuration>
             </plugin>
         </plugins>

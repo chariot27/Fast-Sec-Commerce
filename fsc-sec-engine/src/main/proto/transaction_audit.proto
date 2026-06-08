@@ -1,0 +1,117 @@
+syntax = "proto3";
+
+package com.fsc.secengine.grpc;
+
+option java_package = "com.fsc.secengine.grpc";
+option java_outer_classname = "TransactionAuditProto";
+option java_multiple_files = true;
+
+// =====================================================================
+// FSC TransactionAuditService — Contrato gRPC
+//
+// Canal: grpc://sec-engine:9092 (mTLS obrigatorio)
+// Autenticacao: certificado de cliente (gateway.crt assinado por ca.crt)
+// Protocolo: gRPC over HTTP/2
+// =====================================================================
+
+// Servico principal de auditoria de transacoes.
+// Exposto pelo Sec Engine (servidor gRPC na porta 9092).
+// Consumido pelo Gateway (cliente gRPC com mTLS).
+service TransactionAuditService {
+
+    // Avalia uma transacao de forma sincrona e retorna a decisao antifraude.
+    // Timeout recomendado: 8 segundos (configurado no Gateway via TimeLimiter).
+    // Circuit Breaker: ativado no Gateway (threshold 60% falhas em janela de 50 calls).
+    rpc EvaluateTransaction(TransactionRequest) returns (AuditDecision);
+
+    // Stream de eventos de auditoria em tempo real (server-side streaming).
+    // O Gateway pode subscrever para receber atualizacoes continuamente.
+    rpc StreamAuditEvents(AuditStreamRequest) returns (stream AuditEvent);
+}
+
+// ─── Request Messages ─────────────────────────────────────────────
+
+// Payload de requisicao de auditoria enviado pelo Gateway ao Sec Engine.
+message TransactionRequest {
+    // Identificador unico da transacao (UUIDv4).
+    string transaction_id = 1;
+
+    // Identificador do pedido no sistema parceiro.
+    string order_id = 2;
+
+    // Account ID da conta debitada (formato: ACC-XXX-BUYER).
+    string debit_account = 3;
+
+    // Account ID da conta creditada (formato: ACC-XXX-MERCHANT).
+    string credit_account = 4;
+
+    // Valor da transacao em centavos (evita ponto flutuante).
+    // Exemplo: R$ 250,00 = 25000
+    int64 amount_cents = 5;
+
+    // Codigo da moeda (ISO 4217). Exemplo: BRL, USD.
+    string currency = 6;
+
+    // Metadados adicionais (IP do cliente, user agent, etc.) para heuristicas.
+    map<string, string> metadata = 7;
+}
+
+// Requisicao de stream de eventos (pode filtrar por tipo ou desde um timestamp).
+message AuditStreamRequest {
+    // Apenas eventos a partir deste timestamp Unix (0 = todos).
+    int64 since_timestamp = 1;
+}
+
+// ─── Response Messages ────────────────────────────────────────────
+
+// Decisao de auditoria retornada pelo Sec Engine ao Gateway.
+message AuditDecision {
+    // Identificador da transacao (echo do request).
+    string transaction_id = 1;
+
+    // Resultado da avaliacao antifraude.
+    AuditStatus status = 2;
+
+    // Pontuacao de risco (0.0 = sem risco, 1.0 = fraude certa).
+    double risk_score = 3;
+
+    // Motivo da decisao (HEURISTIC_PASS, HEURISTIC_FAIL, VELOCITY_CHECK, etc.).
+    string reason = 4;
+
+    // ID do registro de auditoria persistido no PostgreSQL.
+    string audit_record_id = 5;
+
+    // Tempo de processamento em milissegundos.
+    int64 processing_time_ms = 6;
+}
+
+// Evento de auditoria emitido no stream.
+message AuditEvent {
+    // Tipo do evento.
+    AuditEventType event_type = 1;
+
+    // Decisao associada ao evento.
+    AuditDecision decision = 2;
+
+    // Timestamp Unix do evento.
+    int64 timestamp = 3;
+}
+
+// ─── Enums ────────────────────────────────────────────────────────
+
+// Status possíveis da decisao de auditoria.
+enum AuditStatus {
+    AUDIT_STATUS_UNSPECIFIED = 0;
+    APPROVED                 = 1;  // Transacao aprovada
+    FRAUD_BLOCKED            = 2;  // Fraude detectada — bloquear
+    PENDING_REVIEW           = 3;  // Requer revisao manual
+    INSUFFICIENT_DATA        = 4;  // Dados insuficientes para decidir
+}
+
+// Tipos de eventos no stream de auditoria.
+enum AuditEventType {
+    AUDIT_EVENT_UNSPECIFIED = 0;
+    TRANSACTION_EVALUATED   = 1;  // Transacao avaliada
+    FRAUD_ALERT_EMITTED     = 2;  // Alerta de fraude emitido (SQS)
+    REPORT_STORED           = 3;  // Laudo salvo no S3
+}

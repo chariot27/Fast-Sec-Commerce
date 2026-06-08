@@ -1,12 +1,7 @@
 /**
  * FSC Core Ledger — Mainframe Simulator
- * Simula os programas COBOL FSCCHK, FSCSET e FSCBCH via REST API.
- * Expõe as mesmas interfaces que o z/OS Connect EE exporia em produção.
  * Porta: 9191
- *
- * SECURITY FIXES (2026-06-07):
- *  - T1119/T1565: JWT authentication middleware em todas as rotas sensíveis
- *  - T1070: Input sanitization para prevenir Stored XSS e injection
+ * Swagger UI estatico disponivel em: /api-docs
  */
 
 import express from 'express';
@@ -16,22 +11,30 @@ import jwt from 'jsonwebtoken';
 import jwksClient from 'jwks-rsa';
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+
+app.use(cors({
+  origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Authorization', 'Content-Type'],
+}));
+app.use(express.json({ limit: '64kb' }));
+
+// Remover header que vaza versao do servidor
+app.disable('x-powered-by');
 
 // =====================================================================
-// CONFIGURAÇÃO DE SEGURANÇA — JWT via Keycloak JWKS
+// JWT / KEYCLOAK
 // =====================================================================
 const KEYCLOAK_JWKS_URI = process.env.KEYCLOAK_JWKS_URI ||
   'http://localhost:8080/realms/fsc/protocol/openid-connect/certs';
-const KEYCLOAK_ISSUER   = process.env.KEYCLOAK_ISSUER ||
+const KEYCLOAK_ISSUER = process.env.KEYCLOAK_ISSUER ||
   'http://localhost:8080/realms/fsc';
 
 const jwks = jwksClient({
   jwksUri: KEYCLOAK_JWKS_URI,
   cache: true,
   cacheMaxEntries: 5,
-  cacheMaxAge: 600000, // 10 minutos
+  cacheMaxAge: 600000,
 });
 
 function getSigningKey(header, callback) {
@@ -41,47 +44,27 @@ function getSigningKey(header, callback) {
   });
 }
 
-/**
- * Middleware JWT — valida Bearer token do Keycloak.
- * FIX T1119 + T1565: protege todas as rotas sensíveis.
- */
 function requireAuth(req, res, next) {
   const authHeader = req.headers['authorization'];
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({
-      error: 'UNAUTHORIZED',
-      message: 'Authorization header com Bearer token é obrigatório.',
-    });
+    return res.status(401).json({ error: 'UNAUTHORIZED', message: 'Authorization Bearer token obrigatorio.' });
   }
-
   const token = authHeader.split(' ')[1];
-  jwt.verify(token, getSigningKey, {
-    algorithms: ['RS256'],
-    issuer: KEYCLOAK_ISSUER,
-  }, (err, decoded) => {
-    if (err) {
-      return res.status(401).json({
-        error: 'INVALID_TOKEN',
-        message: `Token inválido ou expirado: ${err.message}`,
-      });
-    }
+  jwt.verify(token, getSigningKey, { algorithms: ['RS256'], issuer: KEYCLOAK_ISSUER }, (err, decoded) => {
+    if (err) return res.status(401).json({ error: 'INVALID_TOKEN', message: `Token invalido: ${err.message}` });
     req.user = decoded;
     next();
   });
 }
 
 // =====================================================================
-// INPUT SANITIZATION — FIX T1070 (Stored XSS)
+// INPUT SANITIZATION
 // =====================================================================
-
-/**
- * Remove caracteres HTML/script e limita o tamanho do campo.
- */
 function sanitizeString(value, maxLen = 64) {
   if (typeof value !== 'string') return '';
   return value
-    .replace(/[<>"'`&]/g, '')   // Remove caracteres HTML perigosos
-    .replace(/[^\w\s\-\.]/g, '') // Permite apenas alfanuméricos, espaço, hífen e ponto
+    .replace(/[<>"'`&]/g, '')
+    .replace(/[^\w\s\-\.]/g, '')
     .trim()
     .slice(0, maxLen);
 }
@@ -93,11 +76,11 @@ function sanitizeAmount(value) {
 }
 
 // =====================================================================
-// DB2 IN-MEMORY SIMULATOR (z/OS Ledger State)
+// DB2 IN-MEMORY SIMULATOR
 // =====================================================================
 const db2 = {
   accounts: {
-    'ACC-001-BUYER':    { id: 'ACC-001-BUYER',    type: 'BUYER',    balance: 50000.00, reserved: 0, status: 'ACTIVE',    owner: 'João Silva' },
+    'ACC-001-BUYER':    { id: 'ACC-001-BUYER',    type: 'BUYER',    balance: 50000.00, reserved: 0, status: 'ACTIVE',    owner: 'Joao Silva' },
     'ACC-002-BUYER':    { id: 'ACC-002-BUYER',    type: 'BUYER',    balance: 1200.00,  reserved: 0, status: 'ACTIVE',    owner: 'Maria Souza' },
     'ACC-003-MERCHANT': { id: 'ACC-003-MERCHANT', type: 'MERCHANT', balance: 8500.00,  reserved: 0, status: 'ACTIVE',    owner: 'Loja FastTech' },
     'ACC-004-MERCHANT': { id: 'ACC-004-MERCHANT', type: 'MERCHANT', balance: 320.00,   reserved: 0, status: 'SUSPENDED', owner: 'Loja XYZ (Suspensa)' },
@@ -115,10 +98,233 @@ function cobolSqlcode(code, msg) { return { sqlcode: code, sqlerrm: msg }; }
 function calcFee(amount) { return Math.max(parseFloat((amount * 0.015).toFixed(2)), 0.50); }
 
 // =====================================================================
-// ROTAS PÚBLICAS (sem auth)
+// SWAGGER UI ESTATICO (OpenAPI 3)
 // =====================================================================
+const openApiSpec = {
+  openapi: '3.0.3',
+  info: {
+    title: 'FSC Core Ledger — Mainframe Simulator API',
+    version: '1.0.0',
+    description: 'API REST que simula os programas COBOL FSCCHK, FSCSET e FSCBCH do z/OS Connect EE. ' +
+                 'Todas as rotas sensiveis requerem Bearer JWT RS256 do Keycloak (realm: fsc).',
+    contact: { name: 'FSC Engineering', url: 'https://github.com/chariot27/Fast-Sec-Commerce' },
+    license: { name: 'MIT', url: 'https://opensource.org/licenses/MIT' },
+  },
+  servers: [{ url: 'http://localhost:9191', description: 'Local Development' }],
+  components: {
+    securitySchemes: {
+      bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT',
+                    description: 'JWT RS256 emitido pelo Keycloak. Realm: fsc.' },
+    },
+    schemas: {
+      SettleRequest: {
+        type: 'object', required: ['debitAcct', 'creditAcct', 'amount'],
+        properties: {
+          orderId:    { type: 'string', example: 'ORD-20240601-001' },
+          debitAcct:  { type: 'string', example: 'ACC-001-BUYER' },
+          creditAcct: { type: 'string', example: 'ACC-003-MERCHANT' },
+          amount:     { type: 'number', format: 'double', example: 250.00 },
+          currency:   { type: 'string', example: 'BRL', default: 'BRL' },
+        },
+      },
+      BalanceResponse: {
+        type: 'object',
+        properties: {
+          sqlcode:          { type: 'integer', example: 0 },
+          sqlerrm:          { type: 'string', example: 'SUCCESSFUL' },
+          fscResReturnCode: { type: 'integer', example: 0 },
+          fscResReasonCode: { type: 'string', example: 'OK  ' },
+          fscResBalance:    { type: 'number', example: 50000.00 },
+          fscResAvailable:  { type: 'number', example: 50000.00 },
+          fscResStatus:     { type: 'string', example: 'ACTIVE' },
+          fscResOwner:      { type: 'string', example: 'Joao Silva' },
+          fscResMsg:        { type: 'string', example: 'BALANCE CHECK SUCCESSFUL' },
+        },
+      },
+      SettleResponse: {
+        type: 'object',
+        properties: {
+          sqlcode:          { type: 'integer', example: 0 },
+          fscResReturnCode: { type: 'integer', example: 0 },
+          fscResReasonCode: { type: 'string', example: 'SETL' },
+          fscResMsg:        { type: 'string', example: 'EXEC CICS SYNCPOINT - DEBIT/CREDIT COMMITTED TO DB2' },
+          settlement: {
+            type: 'object',
+            properties: {
+              transId:      { type: 'string', format: 'uuid' },
+              orderId:      { type: 'string' },
+              amount:       { type: 'number' },
+              fee:          { type: 'number' },
+              totalDebit:   { type: 'number' },
+              status:       { type: 'string', example: 'SETTLED' },
+              procTimestamp:{ type: 'string', format: 'date-time' },
+            },
+          },
+        },
+      },
+    },
+  },
+  security: [{ bearerAuth: [] }],
+  paths: {
+    '/zosconnect/health': {
+      get: {
+        tags: ['System'],
+        summary: 'Health check do simulador z/OS',
+        description: 'Endpoint publico para Prometheus e Docker healthcheck. Nao requer autenticacao.',
+        security: [],
+        responses: {
+          '200': { description: 'Simulador operacional',
+            content: { 'application/json': { example: {
+              status: 'UP', system: 'FSC-Core-Ledger-Simulator',
+              cobolPrograms: ['FSCCHK', 'FSCSET', 'FSCBCH'],
+              db2Tables: ['FSC.ACCOUNTS', 'FSC.LEDGER_AUDIT'],
+              mqQueueDepth: 0, timestamp: '2024-01-01T00:00:00.000Z',
+            }}}},
+        },
+      },
+    },
+    '/zosconnect/accounts': {
+      get: {
+        tags: ['Ledger'],
+        summary: 'DB2 Snapshot — lista de contas',
+        description: 'Retorna todas as contas do ledger em memoria (equivalente: SELECT * FROM FSC.ACCOUNTS). Requer JWT.',
+        responses: {
+          '200': { description: 'Lista de contas retornada com sucesso' },
+          '401': { description: 'Token JWT ausente ou invalido' },
+        },
+      },
+    },
+    '/zosconnect/fscchk/balance/{accountId}': {
+      get: {
+        tags: ['FSCCHK'],
+        summary: 'FSCCHK — Verificar saldo de conta',
+        description: 'Programa COBOL FSCCHK via CICS REST. Executa EXEC SQL SELECT FROM FSC.ACCOUNTS. ' +
+                     'Retorna SQLCODE, REASON-CODE, saldo total e disponivel.',
+        parameters: [
+          { name: 'accountId', in: 'path', required: true, schema: { type: 'string' }, example: 'ACC-001-BUYER',
+            description: 'ID da conta no formato ACC-XXX-TYPE' },
+          { name: 'amount', in: 'query', required: false, schema: { type: 'number' }, example: 1000.00,
+            description: 'Valor a verificar disponibilidade (opcional)' },
+        ],
+        responses: {
+          '200': { description: 'Saldo verificado com sucesso',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/BalanceResponse' }}}},
+          '401': { description: 'Token JWT ausente ou invalido' },
+          '404': { description: 'Conta nao encontrada no ledger (SQLCODE +100)' },
+        },
+      },
+    },
+    '/zosconnect/fscset/settle': {
+      post: {
+        tags: ['FSCSET'],
+        summary: 'FSCSET — Liquidacao atomica entre contas',
+        description: 'Programa COBOL FSCSET. Simula EXEC CICS SYNCPOINT com debito/credito atomico no DB2. ' +
+                     'Calcula taxa de 1,5% (minimo R$0,50) automaticamente. Idempotente por transId.',
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/SettleRequest' },
+            example: { orderId: 'ORD-20240601-001', debitAcct: 'ACC-001-BUYER',
+                       creditAcct: 'ACC-003-MERCHANT', amount: 250.00, currency: 'BRL' }}},
+        },
+        responses: {
+          '201': { description: 'Liquidacao executada — SYNCPOINT COMMITTED',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/SettleResponse' }}}},
+          '400': { description: 'Valor invalido ou fora do limite' },
+          '401': { description: 'Token JWT ausente ou invalido' },
+          '404': { description: 'Conta debitada ou creditada nao encontrada' },
+          '422': { description: 'Saldo insuficiente — SYNCPOINT ROLLBACK emitido' },
+        },
+      },
+    },
+    '/zosconnect/fscbch/daily-report': {
+      get: {
+        tags: ['FSCBCH'],
+        summary: 'FSCBCH — Relatorio batch diario',
+        description: 'Programa JCL FSCBCH. Retorna SELECT COUNT(*), SUM(amount), SUM(fee) FROM FSC.LEDGER_AUDIT ' +
+                     'agrupado pela data atual. Inclui output SYSPRINT formatado.',
+        responses: {
+          '200': { description: 'Relatorio gerado com sucesso' },
+          '401': { description: 'Token JWT ausente ou invalido' },
+        },
+      },
+    },
+    '/zosconnect/ledger-events': {
+      get: {
+        tags: ['Ledger'],
+        summary: 'SSE Stream — eventos do ledger em tempo real',
+        description: 'Server-Sent Events. Emite snapshot do ledger a cada 5 segundos: ' +
+                     'totalSettled, totalAmount, totalFees, mqQueueDepth.',
+        responses: {
+          '200': { description: 'Stream SSE iniciado. Content-Type: text/event-stream' },
+          '401': { description: 'Token JWT ausente ou invalido' },
+        },
+      },
+    },
+    '/zosconnect/mq/enqueue': {
+      post: {
+        tags: ['IBM MQ'],
+        summary: 'Enfileirar mensagem na fila IBM MQ simulada',
+        description: 'Adiciona uma mensagem de liquidacao na fila MQ em memoria. Retorna mqMsgId e depth atual.',
+        responses: {
+          '202': { description: 'Mensagem enfileirada com sucesso' },
+          '401': { description: 'Token JWT ausente ou invalido' },
+        },
+      },
+    },
+    '/zosconnect/mq/process-next': {
+      post: {
+        tags: ['IBM MQ'],
+        summary: 'Processar proxima mensagem da fila MQ',
+        description: 'Consome e processa a proxima mensagem da fila MQ. Executa liquidacao automatica.',
+        responses: {
+          '200': { description: 'Mensagem processada e liquidacao commitada' },
+          '204': { description: 'Fila vazia — nenhuma mensagem para processar' },
+          '401': { description: 'Token JWT ausente ou invalido' },
+          '422': { description: 'Saldo insuficiente ou conta nao encontrada — ROLLBACK' },
+        },
+      },
+    },
+  },
+};
 
-// Health check — aberto para Prometheus / Docker healthcheck
+// Servir spec OpenAPI JSON
+app.get('/v3/api-docs', (req, res) => {
+  res.json(openApiSpec);
+});
+
+// Servir Swagger UI via CDN
+app.get('/api-docs', (req, res) => {
+  res.setHeader('Content-Type', 'text/html');
+  res.send(`<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>FSC Core Ledger — API Docs</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui.css">
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui-bundle.js"></script>
+  <script src="https://unpkg.com/swagger-ui-dist@5.17.14/swagger-ui-standalone-preset.js"></script>
+  <script>
+    SwaggerUIBundle({
+      url: '/v3/api-docs',
+      dom_id: '#swagger-ui',
+      presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
+      layout: 'StandaloneLayout',
+      tryItOutEnabled: true,
+      displayRequestDuration: true,
+      tagsSorter: 'alpha',
+    });
+  </script>
+</body>
+</html>`);
+});
+
+// =====================================================================
+// ROTAS PUBLICAS
+// =====================================================================
 app.get('/zosconnect/health', (req, res) => {
   res.json({
     status: 'UP',
@@ -130,11 +336,12 @@ app.get('/zosconnect/health', (req, res) => {
   });
 });
 
-// SSE — Stream de eventos (protegido: requer auth)
+// SSE (requer auth)
 app.get('/zosconnect/ledger-events', requireAuth, (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
 
   const interval = setInterval(() => {
@@ -159,16 +366,12 @@ app.get('/zosconnect/ledger-events', requireAuth, (req, res) => {
 });
 
 // =====================================================================
-// ROTAS PROTEGIDAS — Requerem JWT válido do Keycloak
+// ROTAS PROTEGIDAS
 // =====================================================================
-
-// Listar contas — FIX T1119: agora requer autenticação
 app.get('/zosconnect/accounts', requireAuth, (req, res) => {
   res.json(Object.values(db2.accounts));
 });
 
-// PROGRAMA FSCCHK — Verificação de Saldo
-// FIX T1119: agora requer autenticação
 app.get('/zosconnect/fscchk/balance/:accountId', requireAuth, (req, res) => {
   const accountId = sanitizeString(req.params.accountId, 30);
   const { amount = 0 } = req.query;
@@ -201,15 +404,12 @@ app.get('/zosconnect/fscchk/balance/:accountId', requireAuth, (req, res) => {
   });
 });
 
-// PROGRAMA FSCSET — Liquidação
-// FIX T1565 + T1070: agora requer auth + sanitiza inputs
 app.post('/zosconnect/fscset/settle', requireAuth, (req, res) => {
-  const rawOrderId    = req.body.orderId   || `ORD-${Date.now()}`;
+  const rawOrderId    = req.body.orderId || `ORD-${Date.now()}`;
   const rawDebitAcct  = req.body.debitAcct;
   const rawCreditAcct = req.body.creditAcct;
   const rawAmount     = req.body.amount;
 
-  // FIX T1070: sanitizar todos os inputs
   const transId    = uuidv4();
   const orderId    = sanitizeString(rawOrderId, 64);
   const debitAcct  = sanitizeString(rawDebitAcct, 30);
@@ -219,7 +419,7 @@ app.post('/zosconnect/fscset/settle', requireAuth, (req, res) => {
   const auditHash  = uuidv4().replace(/-/g, '');
 
   if (!amount) {
-    return res.status(400).json({ error: 'INVALID_AMOUNT', message: 'Valor inválido ou fora do limite permitido.' });
+    return res.status(400).json({ error: 'INVALID_AMOUNT', message: 'Valor invalido ou fora do limite permitido.' });
   }
 
   const debit  = db2.accounts[debitAcct];
@@ -240,7 +440,7 @@ app.post('/zosconnect/fscset/settle', requireAuth, (req, res) => {
     });
   }
 
-  const duplicate = db2.ledgerAudit.find(r => r.transId === transId);
+  const duplicate = db2.ledgerAudit.find(r => r.orderId === orderId && r.debitAcct === debitAcct);
   if (duplicate) {
     return res.status(200).json({
       ...cobolSqlcode(-803, 'DUPLICATE KEY - IDEMPOTENT IGNORE'),
@@ -251,7 +451,6 @@ app.post('/zosconnect/fscset/settle', requireAuth, (req, res) => {
     });
   }
 
-  // EXEC CICS SYNCPOINT
   debit.balance  = parseFloat((debit.balance - totalDebit).toFixed(2));
   credit.balance = parseFloat((credit.balance + amount).toFixed(2));
   db2.accounts['ACC-FSC-TREASURY'].balance = parseFloat((db2.accounts['ACC-FSC-TREASURY'].balance + fee).toFixed(2));
@@ -274,7 +473,6 @@ app.post('/zosconnect/fscset/settle', requireAuth, (req, res) => {
   });
 });
 
-// PROGRAMA FSCBCH — Relatório Batch Diário
 app.get('/zosconnect/fscbch/daily-report', requireAuth, (req, res) => {
   const today = new Date().toISOString().slice(0, 10);
   const todayEntries = db2.ledgerAudit.filter(e =>
@@ -315,7 +513,6 @@ app.get('/zosconnect/fscbch/daily-report', requireAuth, (req, res) => {
   });
 });
 
-// Fila MQ — protegida
 app.post('/zosconnect/mq/enqueue', requireAuth, (req, res) => {
   const msg = { ...req.body, mqMsgId: uuidv4(), enqueuedAt: now() };
   db2.mqQueue.push(msg);
@@ -347,12 +544,13 @@ app.post('/zosconnect/mq/process-next', requireAuth, (req, res) => {
 // =====================================================================
 // START
 // =====================================================================
-const PORT = 9191;
+const PORT = process.env.PORT || 9191;
 app.listen(PORT, () => {
-  console.log(`\n╔══════════════════════════════════════════════════════╗`);
-  console.log(`║   FSC CORE LEDGER — z/OS MAINFRAME SIMULATOR [SECURE]║`);
-  console.log(`║   Programas COBOL: FSCCHK | FSCSET | FSCBCH          ║`);
-  console.log(`║   Porta: ${PORT}  │  JWT Auth: ENABLED               ║`);
-  console.log(`║   JWKS: ${KEYCLOAK_JWKS_URI.slice(0, 42)}  ║`);
-  console.log(`╚══════════════════════════════════════════════════════╝\n`);
+  console.log('\n======================================================');
+  console.log('  FSC CORE LEDGER — z/OS MAINFRAME SIMULATOR [SECURE]');
+  console.log('  Programas COBOL: FSCCHK | FSCSET | FSCBCH');
+  console.log(`  Porta: ${PORT}  |  JWT Auth: ENABLED`);
+  console.log(`  Swagger UI: http://localhost:${PORT}/api-docs`);
+  console.log(`  OpenAPI JSON: http://localhost:${PORT}/v3/api-docs`);
+  console.log('======================================================\n');
 });
